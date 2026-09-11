@@ -50,11 +50,8 @@
 │               STRANDS AGENTS REASONING CORE                 │
 │                 (Official Hackathon SDK)                    │
 │                                                             │
-│ PRIMARY INFERENCE:                                          │
-│ • AWS Bedrock Mantle (Grok 4.6 / Claude 3.5 / Llama 3.3)    │
-│                                                             │
-│ ENTERPRISE REDUNDANCY (Failover):                           │
-│ • Nebius Token Factory (NVIDIA Nemotron-3.5)                │
+│ AUTONOMOUS INFERENCE ENGINE:                                │
+│ • AWS Bedrock Mantle (xai.grok-4.6 / Bedrock Runtime)       │
 │                                                             │
 │ Agent Step: Dispatches failing schema diff + target specs   │
 │ and synthesizes pure deterministic Python function:         │
