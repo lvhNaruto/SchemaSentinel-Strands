@@ -1,0 +1,19 @@
+# Environment & Secrets
+.env
+*.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.sqlite
+*.db
+venv/
+.venv/
+
+# Node
+node_modules/
+dist/
+.DS_Store
