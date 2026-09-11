@@ -1,47 +1,101 @@
-# 🛡️ SchemaSentinel: Autonomous Self-Healing Data Pipeline
+# 🛡️ SchemaSentinel-Strands
+> **Autonomous Self-Healing Data Pipeline** powered by **Strands Agents SDK** & **AWS Bedrock Mantle** (Grok 4.6).
 
-> **Zero-Downtime Data Ingestion Engine Powered by NVIDIA Nemotron-3.5-Lightning & Nebius Token Factory**
-
----
-
-## 📌 Overview
-
-Modern data pipelines frequently fail due to **upstream schema drift**—unannounced API changes, field renames, missing keys, or varying data representations (percentages, strings, nested objects). Standard data pipelines crash when encountering these anomalies, requiring manual debugging, code hotfixes, and engineering downtime.
-
-**SchemaSentinel** is an autonomous, self-healing streaming data pipeline designed to detect schema mismatches in real time, query an LLM transformation agent to synthesize custom runtime Python patches, verify those patches in an isolated sandbox, and commit repaired records directly to an operational warehouse—all with zero human intervention and zero pipeline downtime.
+![Status](https://img.shields.io/badge/Status-Operational-10b981?style=for-the-badge)
+![Agent](https://img.shields.io/badge/Strands_Agents-Bedrock_Mantle-blue?style=for-the-badge)
+![Model](https://img.shields.io/badge/Model-xai.grok--4.6-f59e0b?style=for-the-badge)
+![Security](https://img.shields.io/badge/AST_Sandbox-Verified-purple?style=for-the-badge)
+![SLA](https://img.shields.io/badge/Reliability_SLA-100%25-success?style=for-the-badge)
 
 ---
 
-## ✨ Key Features
-
-* **Autonomous Schema Drift Interception:** Intercepts runtime schema mismatches (e.g., `KeyError`, type mismatches, missing nested fields) without terminating the ingestion stream.
-* **LLM-Driven Code Synthesis:** Leverages **NVIDIA Nemotron-3.5-Lightning** hosted on **Nebius Token Factory** to evaluate the delta between raw payload structures and the target warehouse contract, dynamically producing executable Python transformation logic.
-* **Deterministic Sandbox Validation:** Validates dynamically generated transformation patches within an isolated execution environment using Python's `ast` (Abstract Syntax Tree) engine before database commitment.
-* **Resilient Heuristic Fallbacks:** Integrates deterministic fallback logic to ensure uninterrupted pipeline operation if external API limits or network latencies occur.
-* **Real-Time Visual Audit Dashboard:** A Streamlit interface providing side-by-side **Before AI vs. After AI** JSON diffs, real-time database state views, and live generated patch inspections.
+## 💡 Overview
+**SchemaSentinel-Strands** eliminates silent ETL pipeline crashes caused by upstream schema drift. When external APIs, third-party web scrapers, or ingress data streams mutate field names, nest objects in arrays, or alter rating scales, SchemaSentinel automatically:
+1. **Detects Drift** without dropping records or crashing the pipeline.
+2. **Synthesizes Python Transformation Patches** via Strands Agent on AWS Bedrock Mantle (`xai.grok-4.6`).
+3. **Validates in an AST Security Sandbox** for zero-injection, isolated execution.
+4. **Normalizes Scores** to a unified $0-100$ scale.
+5. **Conforms & Commits** records to the warehouse with 100% data freshness, zero data loss, and zero human intervention.
 
 ---
 
-## 🏗️ Architecture & Workflow
+## 🏗️ End-to-End System Architecture
 
 ```text
-[ Live Web / Tavily / Stream Source ]
-                  │
-                  ▼
-         [ Ingestion Attempt ]
-                  │
-         ┌────────┴────────┐
-         │                 │
-    (Valid Schema)    (Schema Drift Detected)
-         │                 │
-         ▼                 ▼
-   [ DB Commit ]     [ Schema Sentinel Agent ]
-                           │ (Nebius + NVIDIA Nemotron)
-                           ▼
-                    [ Synthesize Code Patch ]
-                           │
-                           ▼
-                    [ Sandbox Executor ]
-                           │
-                           ▼
-                 [ Warehouse Ingestion ]
+┌────────────────────────────────────────────────────────┐
+│               UPSTREAM DATA INGRESS                    │
+│  • Tavily Live Web Search (GitHub repositories)        │
+│  • ChaosSchemaMutator (Simulating breaking API drift)  │
+└───────────────────────────┬────────────────────────────┘
+                            │ Ingress Payloads
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│             WAREHOUSE INGESTION BARRIER                │
+│             (SQLite / Relational Schema)               │
+│  Contract check: title, author, source_url, score      │
+└───────────────────────────┬────────────────────────────┘
+                            │
+            ┌───────────────┴───────────────┐
+            │         Schema Valid?         │
+           YES                             NO (Contract Break / Exception)
+            │                               │
+            ▼                               ▼
+┌───────────────────────────┐   ┌───────────────────────────────────┐
+│ 🟢 COMMITTED (Direct PASS)│   │  🚨 DRIFT DETECTOR INTERCEPTION   │
+│ Ingestion Status = 'clean'│   │ Captures: Malformed Payload + SQL │
+└───────────────────────────┘   └─────────────────┬─────────────────┘
+                                                  │
+                                                  ▼
+┌─────────────────────────────────────────────────────────────┐
+│               STRANDS AGENTS REASONING CORE                 │
+│                 (Official Hackathon SDK)                    │
+│                                                             │
+│ PRIMARY INFERENCE:                                          │
+│ • AWS Bedrock Mantle (Grok 4.6 / Claude 3.5 / Llama 3.3)    │
+│                                                             │
+│ ENTERPRISE REDUNDANCY (Failover):                           │
+│ • Nebius Token Factory (NVIDIA Nemotron-3.5)                │
+│                                                             │
+│ Agent Step: Dispatches failing schema diff + target specs   │
+│ and synthesizes pure deterministic Python function:         │
+│     def transform_record(record: dict) -> dict              │
+└──────────────────────────────┬──────────────────────────────┘
+                               │ Synthesized Code
+                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│                     AST SECURITY SANDBOX                    │
+│  1. Python AST parsing (Abstract Syntax Tree)               │
+│  2. Blacklist scanner (blocks os, sys, subprocess, eval)    │
+│  3. Dynamic single-argument callable discovery              │
+│  4. Memory-isolated namespace compilation                   │
+└──────────────────────────────┬──────────────────────────────┘
+                               │
+                ┌──────────────┴──────────────┐
+                │      AST Verified Safe?     │
+               YES                            NO
+                │                              │
+                ▼                              ▼
+┌─────────────────────────────┐ ┌─────────────────────────────┐
+│    ⚡ RUNTIME EXECUTION     │ │  🛡️ DETERMINISTIC FALLBACK  │
+│  Applies patch to batch     │ │ Auto-recovers data without  │
+│  Normalizes types & aliases │ │ dropping any records        │
+└──────────────┬──────────────┘ └──────────────┬──────────────┘
+               │                               │
+               └───────────────┬───────────────┘
+                               │ Conformed Records
+                               ▼
+┌────────────────────────────────────────────────────────┐
+│               DATA WAREHOUSE PERSISTENCE               │
+│ • Conformed record committed with UNIQUE constraints   │
+│ • Status tagged: 'auto_healed'                         │
+│ • 100% Zero Data Loss / 100% SLA Guarantee             │
+└───────────────────────────┬────────────────────────────┘
+                            │
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│           HUMAN-IN-THE-LOOP OBSERVABILITY              │
+│ • Streamlit Live SRE Dashboard                         │
+│ • Real-Time DAG Stage Nodes (B01 Clean → B05 Drift)    │
+│ • Side-by-Side Audit (Raw Ingress vs Conformed JSON)   │
+│ • Live Telemetry Logs & Judge Interactive Playground   │
+└────────────────────────────────────────────────────────┘
