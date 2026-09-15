@@ -7,98 +7,77 @@ from openai import OpenAI
 from dotenv import load_dotenv
 
 load_dotenv()
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("SchemaSentinel.Agent")
 
+# Pre-compiled Regex patterns for ultra-low latency
+RE_CLEAN_NUM = re.compile(r"[^\d.]")
+RE_CODE_BLOCK = re.compile(r"```(?:python)?\s*(.*?)\s*```", re.DOTALL)
+RE_DEF_BLOCK = re.compile(r"(def\s+[a-zA-Z0-9_]+\s*\([^)]*\):.*)", re.DOTALL)
 
-# =====================================================================
-# DYNAMIC SEMANTIC REASONING ENGINE (ZERO HARDCODED KEYS)
-# =====================================================================
+# Pre-defined token sets (O(1) set lookup)
+AUTHOR_TOKENS = frozenset(["author", "owner", "maintainer", "creator", "user", "vendor", "org", "dev", "contributor"])
+AUTHOR_PENALTY = frozenset(["title", "name", "project", "repo", "summary", "desc"])
+TITLE_TOKENS = frozenset(["title", "heading", "headline", "project", "label", "repo", "product", "software"])
+SCORE_TOKENS = frozenset(["rating", "score", "eval", "confid", "pct", "percent"])
+VANITY_SKIP = frozenset(["star", "fork", "watch", "count", "issue"])
 
-def deep_extract_all_leaves(data, path="") -> list:
-    """Recursively walks any JSON structure (no matter how deeply nested) and returns (path, key, value)."""
+
+def flatten_json_leaves(data) -> list:
+    """Iterative stack traversal (Zero recursion risk, fast linear time)."""
     leaves = []
-    if isinstance(data, dict):
-        for k, v in data.items():
-            current_path = f"{path}.{k}" if path else str(k)
-            if isinstance(v, (dict, list)):
-                leaves.extend(deep_extract_all_leaves(v, current_path))
-            else:
-                leaves.append((current_path.lower(), str(k).lower(), v))
-    elif isinstance(data, list):
-        for idx, item in enumerate(data):
-            current_path = f"{path}[{idx}]"
-            if isinstance(item, (dict, list)):
-                leaves.extend(deep_extract_all_leaves(item, current_path))
-            else:
-                leaves.append((current_path.lower(), str(idx), item))
+    stack = [("", data)]
+    while stack:
+        path, current = stack.pop()
+        if isinstance(current, dict):
+            for k, v in current.items():
+                p = f"{path}.{k}" if path else str(k)
+                stack.append((p, v))
+        elif isinstance(current, list):
+            for idx, item in enumerate(current):
+                p = f"{path}[{idx}]"
+                stack.append((p, item))
+        else:
+            k_name = path.rsplit(".", 1)[-1].split("[")[0]
+            leaves.append((path.lower(), k_name.lower(), current))
     return leaves
 
 
 def semantic_score_author(key: str, path: str, val: any) -> float:
-    """Evaluates how strongly a candidate field represents the 'author' column."""
-    if not isinstance(val, str) or len(val.strip()) == 0 or len(val) > 60:
+    if not isinstance(val, str) or not (0 < len(val.strip()) <= 60) or val.startswith("http"):
         return 0.0
-    if val.startswith("http://") or val.startswith("https://"):
-        return 0.0
-
     score = 0.0
-    target_words = ["author", "owner", "maintainer", "creator", "user", "vendor", "org", "dev", "contributor"]
-    for word in target_words:
+    for word in AUTHOR_TOKENS:
         if word in key:
             score += 3.0
         elif word in path:
             score += 1.5
-
-    # Penalize title-like words
-    if any(w in key for w in ["title", "name", "project", "repo", "summary", "desc"]):
+    if any(w in key for w in AUTHOR_PENALTY):
         score -= 1.0
-
     return score
 
 
 def semantic_score_title(key: str, path: str, val: any, chosen_author: str = "") -> float:
-    """Evaluates how strongly a candidate field represents the 'title' column."""
-    if not isinstance(val, str) or len(val.strip()) == 0:
-        return 0.0
-    if val.startswith("http://") or val.startswith("https://"):
+    if not isinstance(val, str) or len(val.strip()) == 0 or val.startswith("http"):
         return 0.0
     if chosen_author and val.strip().lower() == chosen_author.strip().lower():
         return 0.0
-
     score = 0.0
-    target_words = ["title", "heading", "headline", "project", "label", "repo", "product", "software"]
-    for word in target_words:
+    for word in TITLE_TOKENS:
         if word in key:
             score += 3.0
         elif word in path:
             score += 1.5
-
-    # If it looks like 'org/repo_name' (e.g. 'vllm-project/vllm')
     if "/" in val and not val.startswith("http"):
         score += 2.0
-
-    # Penalize author-like words
     if any(w in key for w in ["author", "owner", "maintainer", "user"]):
         score -= 1.5
-
     return score
 
 
 def universal_normalize_score(val) -> int:
-    """
-    Mathematically projects ANY numeric score/rating system onto an integer 0-100 scale:
-    - Decimals in [0.0, 1.0] -> round(val * 100) (e.g. 0.94 -> 94, 0.67 -> 67)
-    - Ratings in [1.0, 5.0]  -> round(val * 20)  (e.g. 4.6 -> 92, 4.4 -> 88)
-    - Ratings in [5.0, 10.0] -> round(val * 10)  (e.g. 8.5 -> 85, 9.0 -> 90)
-    - Percentages [10, 100]  -> round(val)       (e.g. 87 -> 87, 95% -> 95)
-    - Ratios like 'a/b'      -> (a/b) * 100      (e.g. 18/20 -> 90, 4.6/5 -> 92)
-    - Composable words       -> lexical digits   (e.g. 'ten %' -> 10, 'eighty' -> 80)
-    """
     if val is None:
         return 85
-
     if isinstance(val, (int, float)):
         f = float(val)
         if f <= 1.0:
@@ -107,37 +86,28 @@ def universal_normalize_score(val) -> int:
             return min(100, max(0, int(round(f * 20))))
         elif f <= 10.0:
             return min(100, max(0, int(round(f * 10))))
-        else:
-            return min(100, max(0, int(round(f))))
+        return min(100, max(0, int(round(f))))
 
     s = str(val).strip().lower()
 
     # Composable English word parsing
-    WORD_VALUES = {
-        "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
-        "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11,
-        "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16,
-        "seventeen": 17, "eighteen": 18, "nineteen": 19, "twenty": 20, "thirty": 30,
-        "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90, "hundred": 100
-    }
-    tokens = [t for t in re.split(r"[\s\-_%,]+", s) if t]
-    word_sum = sum(WORD_VALUES[t] for t in tokens if t in WORD_VALUES)
-    if word_sum > 0:
-        return min(100, max(0, word_sum))
+    w_map = {"ten": 10, "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90}
+    for w, v in w_map.items():
+        if w in s:
+            return v
 
-    # Fraction/Ratio detection: e.g. "4.6/5", "18/20", "9/10"
+    # Fraction/Ratio detection
     if "/" in s:
         parts = s.split("/")
         try:
-            n = float(re.sub(r"[^\d.]", "", parts[0]))
-            d = float(re.sub(r"[^\d.]", "", parts[1]))
+            n = float(RE_CLEAN_NUM.sub("", parts[0]))
+            d = float(RE_CLEAN_NUM.sub("", parts[1]))
             if d > 0:
                 return min(100, max(0, int(round((n / d) * 100))))
         except Exception:
             pass
 
-    # Generic numeric regex extraction
-    clean = re.sub(r"[^\d.]", "", s)
+    clean = RE_CLEAN_NUM.sub("", s)
     if clean:
         try:
             f = float(clean)
@@ -147,8 +117,7 @@ def universal_normalize_score(val) -> int:
                 return min(100, max(0, int(round(f * 20))))
             elif f <= 10.0:
                 return min(100, max(0, int(round(f * 10))))
-            else:
-                return min(100, max(0, int(round(f))))
+            return min(100, max(0, int(round(f))))
         except Exception:
             pass
 
@@ -160,11 +129,6 @@ def universal_normalize_score(val) -> int:
 # =====================================================================
 
 class SchemaHealingAgent:
-    """
-    Autonomous Schema Healing Agent powered by AWS Bedrock Mantle + Strands SDK.
-    Uses semantic candidate evaluation across all columns to eliminate hardcoded mappings.
-    """
-
     def __init__(self):
         self.api_key = os.getenv("BEDROCK_API_KEY", "")
         self.region = os.getenv("AWS_REGION", "us-west-2")
@@ -189,20 +153,19 @@ class SchemaHealingAgent:
 Your job is to reason about the semantic meaning of each column in the target SQLite schema and map incoming drifted JSON fields to them dynamically.
 
 TARGET COLUMNS & INTENDED SEMANTICS:
-- 'title' (TEXT NOT NULL): The human-readable name, headline, repository slug, or product title of the entity.
-- 'author' (TEXT NOT NULL): The organization, maintainer, user login, or creator responsible for the entity. If missing, extract from the URL path.
-- 'source_url' (TEXT UNIQUE NOT NULL): The fully qualified web address (starts with http:// or https://) locating the entity.
-- 'relevance_score' (INTEGER NOT NULL): A normalized 0 to 100 integer representing the confidence, rating, or score:
-  * 0.0 to 1.0 -> multiply by 100 (e.g. 0.94 -> 94)
-  * 1.0 to 5.0 (out of 5 stars) -> multiply by 20 (e.g. 4.6 -> 92)
-  * 10 to 100 -> direct value
-  * Ignore repository star counters like '47.3k' when determining relevance score!
+- 'title' (TEXT NOT NULL): The human-readable name, headline, repository slug, or product title.
+- 'author' (TEXT NOT NULL): The organization, maintainer, user login, or creator.
+- 'source_url' (TEXT UNIQUE NOT NULL): Valid web address (starts with http:// or https://).
+- 'relevance_score' (INTEGER NOT NULL): Normalized 0-100 scale:
+  * 0.0-1.0 -> * 100
+  * 1.0-5.0 (out of 5 stars) -> * 20 (e.g. 4.6 -> 92)
+  * 10-100 -> direct value
+  * Ignore vanity counts like '47.3k stars'!
 
 STRICT INSTRUCTIONS:
-1. Return ONLY valid Python code enclosed in a ```python ... ``` block.
-2. Function signature must be: def transform_record(record: dict) -> dict:
-3. Unpack nested structures (like 'metadata', 'raw_metrics') recursively.
-4. AST Safety: NEVER import os, sys, subprocess, or call eval/exec."""
+1. Return ONLY valid Python code enclosed in ```python ... ``` block.
+2. Function signature: def transform_record(record: dict) -> dict:
+3. AST Safety: NEVER import os, sys, subprocess, or call eval/exec."""
 
         user_content = f"""Target SQLite Schema Definition:
 {target_schema}
@@ -226,8 +189,7 @@ Synthesize the autonomous transform_record function now:"""
                 temperature=0.0,
                 max_tokens=900,
             )
-            content = response.choices[0].message.content or ""
-            return content
+            return response.choices[0].message.content or ""
         except Exception as e:
             logger.warning(f"Bedrock Mantle invocation error: {e}")
             logger.info("Engaging universal semantic fallback synthesizer...")
@@ -235,15 +197,14 @@ Synthesize the autonomous transform_record function now:"""
 
     def extract_pure_code(self, raw_patch: str) -> str:
         text = raw_patch.strip()
-        if "```" in text:
-            matches = re.findall(r"```(?:python)?\s*(.*?)\s*```", text, re.DOTALL)
-            if matches:
-                text = matches[0].strip()
-            else:
-                text = re.sub(r"^```[a-zA-Z]*\n?", "", text)
-                text = re.sub(r"\n?```$", "", text).strip()
+        matches = RE_CODE_BLOCK.findall(text)
+        if matches:
+            text = matches[0].strip()
+        else:
+            text = re.sub(r"^```[a-zA-Z]*\n?", "", text)
+            text = re.sub(r"\n?```$", "", text).strip()
 
-        def_match = re.search(r"(def\s+[a-zA-Z0-9_]+\s*\([^)]*\):.*)", text, re.DOTALL)
+        def_match = RE_DEF_BLOCK.search(text)
         if def_match:
             text = def_match.group(1)
 
@@ -255,205 +216,154 @@ Synthesize the autonomous transform_record function now:"""
             return self.get_deterministic_fallback()
 
     def get_fallback_dict(self, record: dict) -> dict:
-        """
-        Dynamically analyzes all input leaves and picks the best semantic match for EVERY column:
-        title, author, source_url, and relevance_score.
-        Zero hardcoded keys.
-        """
-        leaves = deep_extract_all_leaves(record)
+        leaves = flatten_json_leaves(record)
 
-        # 1. RESOLVE SOURCE_URL: Look for any string value that represents a valid web URL
-        source_url = ""
-        for path, key, val in leaves:
-            if isinstance(val, str) and (val.startswith("http://") or val.startswith("https://")):
-                source_url = val.strip()
-                break
-        if not source_url:
-            source_url = f"https://github.com/project?id={int(time.time()*1000)}"
+        # 1. Source URL
+        source_url = next(
+            (val.strip() for _, _, val in leaves if isinstance(val, str) and val.startswith(("http://", "https://"))),
+            f"https://github.com/project?id={int(time.time()*1000)}"
+        )
 
-        # 2. RESOLVE AUTHOR: Contributor list with owner flag, or highest semantic author score
+        # 2. Author
         author = ""
-        if isinstance(record.get("contributors_data"), list):
-            for c in record["contributors_data"]:
-                if isinstance(c, dict) and any(c.get(k) is True for k in ["is_owner", "owner", "admin"]):
+        contributors = record.get("contributors_data")
+        if isinstance(contributors, list) and contributors:
+            for c in contributors:
+                if isinstance(c, dict) and any(c.get(k) is True for k in ("is_owner", "owner", "admin")):
                     author = str(c.get("username") or c.get("name") or c.get("login") or "").strip()
                     break
-            if not author and len(record["contributors_data"]) > 0 and isinstance(record["contributors_data"][0], dict):
-                author = str(record["contributors_data"][0].get("username") or record["contributors_data"][0].get("name") or "").strip()
+            if not author and isinstance(contributors[0], dict):
+                author = str(contributors[0].get("username") or contributors[0].get("name") or "").strip()
 
         if not author:
-            best_author_score = 0.0
+            best_score, candidate = 0.0, ""
             for path, key, val in leaves:
                 s = semantic_score_author(key, path, val)
-                if s > best_author_score:
-                    best_author_score = s
-                    author = str(val).strip()
+                if s > best_score:
+                    best_score, candidate = s, str(val).strip()
+            author = candidate
 
-        if not author and "github.com/" in str(source_url):
-            try:
-                parts = str(source_url).split("github.com/")[-1].split("/")
-                if len(parts) >= 1 and parts[0]:
-                    author = parts[0].strip()
-            except Exception:
-                pass
+        if not author and "github.com/" in source_url:
+            parts = [p for p in source_url.split("github.com/")[-1].split("?")[0].split("/") if p]
+            if parts:
+                author = parts[0]
 
-        if not author:
-            author = "OpenSource Contributor"
+        author = author or "OpenSource Contributor"
 
-        # 3. RESOLVE TITLE: Highest semantic title score distinct from the chosen author
-        title = ""
-        best_title_score = 0.0
+        # 3. Title
+        best_title_score, title = 0.0, ""
         for path, key, val in leaves:
             s = semantic_score_title(key, path, val, chosen_author=author)
             if s > best_title_score:
-                best_title_score = s
-                title = str(val).strip()
+                best_title_score, title = s, str(val).strip()
 
-        if not title and "github.com/" in str(source_url):
-            try:
-                slug = str(source_url).split("github.com/")[-1].split("?")[0].split("/")
-                if len(slug) >= 2:
-                    title = f"{slug[0]}/{slug[1]}".strip()
-            except Exception:
-                pass
+        if not title and "github.com/" in source_url:
+            parts = [p for p in source_url.split("github.com/")[-1].split("?")[0].split("/") if p]
+            if len(parts) >= 2:
+                title = f"{parts[0]}/{parts[1]}"
 
-        if not title:
-            title = "Evaluated AI Project"
+        title = title or "Evaluated AI Project"
 
-        # 4. RESOLVE RELEVANCE_SCORE: Prioritize ratings/eval/scores, ignoring star counts
-        score_val = None
-        # Primary check: fields explicitly containing rating, score, eval, confid, or pct
-        for path, key, val in leaves:
-            if any(term in key for term in ["rating", "score", "eval", "confid", "pct", "percent"]):
-                score_val = val
-                break
-
-        # Secondary check: general metrics, skipping vanity counts
+        # 4. Relevance Score
+        score_val = next(
+            (val for path, key, val in leaves if any(t in key for t in SCORE_TOKENS)),
+            None
+        )
         if score_val is None:
-            for path, key, val in leaves:
-                if "metric" in path and not any(skip in key for skip in ["star", "fork", "watch", "count", "issue"]):
-                    score_val = val
-                    break
-
-        relevance_score = universal_normalize_score(score_val)
+            score_val = next(
+                (val for path, key, val in leaves if "metric" in path and not any(skip in key for skip in VANITY_SKIP)),
+                None
+            )
 
         return {
             "title": str(title).strip(),
             "author": str(author).strip(),
             "source_url": str(source_url).strip(),
-            "relevance_score": int(relevance_score)
+            "relevance_score": int(universal_normalize_score(score_val))
         }
 
     def get_deterministic_fallback(self) -> str:
         """
-        Synthesizes a self-contained, AST-safe Python function that evaluates every column
-        using semantic candidate scoring.
+        Pure AST-safe fallback without any disallowed imports like urllib.
         """
         return textwrap.dedent('''
-        # Synthesized dynamically by SchemaSentinel Autonomous Agent
         def transform_record(record: dict) -> dict:
-            import re
             import time
+            import re
 
-            # Recursive leaf collector
-            def get_leaves(d, p=""):
-                items = []
-                if isinstance(d, dict):
-                    for k, v in d.items():
-                        sp = f"{p}.{k}" if p else str(k)
-                        if isinstance(v, (dict, list)):
-                            items.extend(get_leaves(v, sp))
-                        else:
-                            items.append((sp.lower(), str(k).lower(), v))
-                elif isinstance(d, list):
-                    for idx, item in enumerate(d):
-                        sp = f"{p}[{idx}]"
-                        if isinstance(item, (dict, list)):
-                            items.extend(get_leaves(item, sp))
-                        else:
-                            items.append((sp.lower(), str(idx), item))
-                return items
+            leaves = []
+            stack = [("", record)]
+            while stack:
+                path, current = stack.pop()
+                if isinstance(current, dict):
+                    for k, v in current.items():
+                        stack.append((f"{path}.{k}" if path else str(k), v))
+                elif isinstance(current, list):
+                    for idx, item in enumerate(current):
+                        stack.append((f"{path}[{idx}]", item))
+                else:
+                    k_name = path.rsplit(".", 1)[-1].split("[")[0]
+                    leaves.append((path.lower(), k_name.lower(), current))
 
-            leaves = get_leaves(record)
-
-            # 1. Source URL: Any fully qualified web address
+            # 1. Source URL
             source_url = ""
-            for path, key, val in leaves:
-                if isinstance(val, str) and (val.startswith("http://") or val.startswith("https://")):
-                    source_url = val.strip()
+            for _, _, v in leaves:
+                if isinstance(v, str) and (v.startswith("http://") or v.startswith("https://")):
+                    source_url = v.strip()
                     break
             if not source_url:
                 source_url = f"https://github.com/project?id={int(time.time()*1000)}"
 
-            # 2. Author: Check contributors list or scan for author/owner/user/maintainer tokens
+            # 2. Author
             author = ""
-            if isinstance(record.get("contributors_data"), list):
-                for c in record["contributors_data"]:
-                    if isinstance(c, dict) and any(c.get(k) is True for k in ["is_owner", "owner", "admin"]):
+            contribs = record.get("contributors_data")
+            if isinstance(contribs, list) and contribs:
+                for c in contribs:
+                    if isinstance(c, dict) and any(c.get(k) is True for k in ("is_owner", "owner", "admin")):
                         author = str(c.get("username") or c.get("name") or c.get("login") or "").strip()
                         break
-                if not author and len(record["contributors_data"]) > 0 and isinstance(record["contributors_data"][0], dict):
-                    author = str(record["contributors_data"][0].get("username") or "").strip()
+                if not author and isinstance(contribs[0], dict):
+                    author = str(contribs[0].get("username") or "").strip()
 
             if not author:
-                for path, key, val in leaves:
-                    if any(t in key for t in ["author", "maintainer", "owner", "creator", "dev", "user", "org"]):
+                for _, key, val in leaves:
+                    if any(t in key for t in ("author", "maintainer", "owner", "creator", "dev", "user", "org")):
                         if isinstance(val, str) and 0 < len(val) < 60 and not val.startswith("http"):
                             author = val.strip()
                             break
 
-            if not author and "github.com/" in str(source_url):
-                try:
-                    parts = str(source_url).split("github.com/")[-1].split("/")
-                    if parts[0]:
-                        author = parts[0].strip()
-                except Exception:
-                    pass
-            if not author:
-                author = "OpenSource Contributor"
+            if not author and "github.com/" in source_url:
+                parts = [p for p in source_url.split("github.com/")[-1].split("?")[0].split("/") if p]
+                if parts:
+                    author = parts[0]
+            author = author or "OpenSource Contributor"
 
-            # 3. Title: Scan for name/title/label/project distinct from author
+            # 3. Title
             title = ""
-            for path, key, val in leaves:
-                if any(t in key for t in ["title", "heading", "headline", "project", "label", "repo", "product", "software"]):
+            for _, key, val in leaves:
+                if any(t in key for t in ("title", "heading", "headline", "project", "label", "repo")):
                     if isinstance(val, str) and len(val.strip()) > 1 and not val.startswith("http") and val.strip() != author:
                         title = val.strip()
                         break
 
-            if not title and "github.com/" in str(source_url):
-                try:
-                    slug = str(source_url).split("github.com/")[-1].split("?")[0].split("/")
-                    if len(slug) >= 2:
-                        title = f"{slug[0]}/{slug[1]}".strip()
-                except Exception:
-                    pass
-            if not title:
-                title = "Evaluated AI Project"
+            if not title and "github.com/" in source_url:
+                parts = [p for p in source_url.split("github.com/")[-1].split("?")[0].split("/") if p]
+                if len(parts) >= 2:
+                    title = f"{parts[0]}/{parts[1]}"
+            title = title or "Evaluated AI Project"
 
-            # 4. Relevance Score: Prioritize ratings & evaluations, skipping star counters
+            # 4. Score
             score_val = None
-            for path, key, val in leaves:
-                if any(t in key for t in ["rating", "score", "eval", "confid", "pct", "percent"]):
-                    score_val = val
+            for _, k, v in leaves:
+                if any(t in k for t in ("rating", "score", "eval", "confid", "pct")):
+                    score_val = v
                     break
-            if score_val is None:
-                for path, key, val in leaves:
-                    if "metric" in path and not any(skip in key for skip in ["star", "fork", "watch", "count", "issue"]):
-                        score_val = val
-                        break
 
             relevance_score = 85
             if score_val is not None:
                 if isinstance(score_val, (int, float)):
                     f = float(score_val)
-                    if f <= 1.0:
-                        relevance_score = int(round(f * 100))
-                    elif f <= 5.0:
-                        relevance_score = int(round(f * 20))
-                    elif f <= 10.0:
-                        relevance_score = int(round(f * 10))
-                    else:
-                        relevance_score = int(round(f))
+                    relevance_score = int(round(f * 100)) if f <= 1.0 else (int(round(f * 20)) if f <= 5.0 else int(round(f)))
                 else:
                     s = str(score_val).strip().lower()
                     if "/" in s:
@@ -478,14 +388,7 @@ Synthesize the autonomous transform_record function now:"""
                             if clean:
                                 try:
                                     f = float(clean)
-                                    if f <= 1.0:
-                                        relevance_score = int(round(f * 100))
-                                    elif f <= 5.0:
-                                        relevance_score = int(round(f * 20))
-                                    elif f <= 10.0:
-                                        relevance_score = int(round(f * 10))
-                                    else:
-                                        relevance_score = int(round(f))
+                                    relevance_score = int(round(f * 100)) if f <= 1.0 else (int(round(f * 20)) if f <= 5.0 else int(round(f)))
                                 except Exception:
                                     pass
 
