@@ -1,98 +1,62 @@
 # 🛡️ SchemaSentinel-Strands
-> **Autonomous Self-Healing Data Pipeline** powered by **Strands Agents SDK** & **AWS Bedrock Mantle** (Grok 4.6).
-
-![Status](https://img.shields.io/badge/Status-Operational-10b981?style=for-the-badge)
-![Agent](https://img.shields.io/badge/Strands_Agents-Bedrock_Mantle-blue?style=for-the-badge)
-![Model](https://img.shields.io/badge/Model-xai.grok--4.6-f59e0b?style=for-the-badge)
-![Security](https://img.shields.io/badge/AST_Sandbox-Verified-purple?style=for-the-badge)
-![SLA](https://img.shields.io/badge/Reliability_SLA-100%25-success?style=for-the-badge)
+> **Autonomous Self-Healing Data Reliability Agent for Streaming Pipelines**  
+> Powered by **Strands Agents SDK** on **AWS Bedrock Mantle (Grok 4.6)** • AST Security Sandbox • Dead Letter Queue (DLQ)
 
 ---
 
-## 💡 Overview
-**SchemaSentinel-Strands** eliminates silent ETL pipeline crashes caused by upstream schema drift. When external APIs, third-party web scrapers, or ingress data streams mutate field names, nest objects in arrays, or alter rating scales, SchemaSentinel automatically:
-1. **Detects Drift** without dropping records or crashing the pipeline.
-2. **Synthesizes Python Transformation Patches** via Strands Agent on AWS Bedrock Mantle (`xai.grok-4.6`).
-3. **Validates in an AST Security Sandbox** for zero-injection, isolated execution.
-4. **Normalizes Scores** to a unified $0-100$ scale.
-5. **Conforms & Commits** records to the warehouse with 100% data freshness, zero data loss, and zero human intervention.
+## ⚡ The Problem & Why SchemaSentinel Exists
+
+**Imagine this:** It's 2:00 AM. A third-party company pushes an update and silently changes a single field name: `"user_id"` becomes `"userId"`.
+
+Instantly, your entire data pipeline crashes. Red alert sirens go off on PagerDuty. Critical executive dashboards freeze, analytics reports show zero, and engineers are woken up in the middle of the night to write an emergency 2-line code fix.
+
+**Data pipes shouldn't be this fragile.**
+
+**SchemaSentinel acts as an autonomous shock-absorber for your data.** Think of it like a smart universal adapter: the moment incoming data shifts or changes shape, SchemaSentinel automatically catches it, rewires the mismatch in 300 milliseconds, and flows clean data straight into your warehouse—**no broken pipelines, no midnight alarms, and zero downtime.**
 
 ---
 
-## 🏗️ End-to-End System Architecture
+## 🏗️ Architecture
 
 ```text
-┌────────────────────────────────────────────────────────┐
-│               UPSTREAM DATA INGRESS                    │
-│  • Tavily Live Web Search (GitHub repositories)        │
-│  • ChaosSchemaMutator (Simulating breaking API drift)  │
-└───────────────────────────┬────────────────────────────┘
-                            │ Ingress Payloads
-                            ▼
-┌────────────────────────────────────────────────────────┐
-│             WAREHOUSE INGESTION BARRIER                │
-│             (SQLite / Relational Schema)               │
-│  Contract check: title, author, source_url, score      │
-└───────────────────────────┬────────────────────────────┘
-                            │
-            ┌───────────────┴───────────────┐
-            │         Schema Valid?         │
-           YES                             NO (Contract Break / Exception)
-            │                               │
-            ▼                               ▼
-┌───────────────────────────┐   ┌───────────────────────────────────┐
-│ 🟢 COMMITTED (Direct PASS)│   │  🚨 DRIFT DETECTOR INTERCEPTION   │
-│ Ingestion Status = 'clean'│   │ Captures: Malformed Payload + SQL │
-└───────────────────────────┘   └─────────────────┬─────────────────┘
-                                                  │
-                                                  ▼
-┌─────────────────────────────────────────────────────────────┐
-│               STRANDS AGENTS REASONING CORE                 │
-│                 (Official Hackathon SDK)                    │
-│                                                             │
-│ AUTONOMOUS INFERENCE ENGINE:                                │
-│ • AWS Bedrock Mantle (xai.grok-4.6 / Bedrock Runtime)       │
-│                                                             │
-│ Agent Step: Dispatches failing schema diff + target specs   │
-│ and synthesizes pure deterministic Python function:         │
-│     def transform_record(record: dict) -> dict              │
-└──────────────────────────────┬──────────────────────────────┘
-                               │ Synthesized Code
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│                     AST SECURITY SANDBOX                    │
-│  1. Python AST parsing (Abstract Syntax Tree)               │
-│  2. Blacklist scanner (blocks os, sys, subprocess, eval)    │
-│  3. Dynamic single-argument callable discovery              │
-│  4. Memory-isolated namespace compilation                   │
-└──────────────────────────────┬──────────────────────────────┘
-                               │
-                ┌──────────────┴──────────────┐
-                │      AST Verified Safe?     │
-               YES                            NO
-                │                              │
-                ▼                              ▼
-┌─────────────────────────────┐ ┌─────────────────────────────┐
-│    ⚡ RUNTIME EXECUTION     │ │  🛡️ DETERMINISTIC FALLBACK  │
-│  Applies patch to batch     │ │ Auto-recovers data without  │
-│  Normalizes types & aliases │ │ dropping any records        │
-└──────────────┬──────────────┘ └──────────────┬──────────────┘
-               │                               │
-               └───────────────┬───────────────┘
-                               │ Conformed Records
-                               ▼
-┌────────────────────────────────────────────────────────┐
-│               DATA WAREHOUSE PERSISTENCE               │
-│ • Conformed record committed with UNIQUE constraints   │
-│ • Status tagged: 'auto_healed'                         │
-│ • 100% Zero Data Loss / 100% SLA Guarantee             │
-└───────────────────────────┬────────────────────────────┘
-                            │
-                            ▼
-┌────────────────────────────────────────────────────────┐
-│           HUMAN-IN-THE-LOOP OBSERVABILITY              │
-│ • Streamlit Live SRE Dashboard                         │
-│ • Real-Time DAG Stage Nodes (B01 Clean → B05 Drift)    │
-│ • Side-by-Side Audit (Raw Ingress vs Conformed JSON)   │
-│ • Live Telemetry Logs & Judge Interactive Playground   │
-└────────────────────────────────────────────────────────┘
+[ Upstream Ingress Stream ] (GitHub REST API + Tavily Grounding)
+            │
+            ▼
+[ Tier-1: Linguistic Entropy Guard ] (Rejects keyboard mash in 0.1ms)
+            │
+            ▼
+[ Warehouse Contract Validator ]
+    ├── Matches DDL  ────────► [ ✅ Clean Ingress ] ────┐
+    └── Drift Detected                                  │
+            │                                           ▼
+            ▼                                 [ Live Warehouse ]
+  [ Strands Agent Engine ]                     (tech_projects)
+    (AWS Bedrock Mantle)                      (0% Schema Downtime)
+            │                                           ▲
+            ▼                                           │
+  [ AST Security Sandbox ]                              │
+    ├── Compile Passed ──────► Auto-Heals & Conforms ───┘
+    └── Compile Failed ──────► [ Dead Letter Queue (DLQ) ]
+                               (tech_projects_dlq)
+                               (Zero Warehouse Pollution)
+```
+
+---
+
+## 🚀 Quickstart
+
+```bash
+# 1. Clone & Install
+git clone https://github.com/lvhNaruto/SchemaSentinel-Strands.git
+cd SchemaSentinel-Strands
+pip install -r requirements.txt
+
+# 2. Environment (.env)
+AWS_ACCESS_KEY_ID=your_key
+AWS_SECRET_ACCESS_KEY=your_secret
+AWS_REGION=us-east-1
+TAVILY_API_KEY=your_key
+
+# 3. Launch App
+streamlit run app.py
+```
