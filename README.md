@@ -1,6 +1,6 @@
 # 🛡️ SchemaSentinel-Strands
 > **Autonomous Self-Healing Data Reliability Agent for Streaming Pipelines**  
-> Powered by **Strands Agents SDK** on **AWS Bedrock Mantle (Grok 4.6)** • AST Security Sandbox • Dead Letter Queue (DLQ)
+> Powered by **Strands Agents SDK** on **AWS Bedrock Mantle** with **Nebius Studio SOTA LLM Fallback** • AST Security Sandbox • Dead Letter Queue (DLQ)
 
 ---
 
@@ -12,11 +12,11 @@ Instantly, your entire data pipeline crashes. Red alert sirens go off on PagerDu
 
 **Data pipes shouldn't be this fragile.**
 
-**SchemaSentinel acts as an autonomous shock-absorber for your data.** Think of it like a smart universal adapter: the moment incoming data shifts or changes shape, SchemaSentinel automatically catches it, rewires the mismatch in 300 milliseconds, and flows clean data straight into your warehouse—**no broken pipelines, no midnight alarms, and zero downtime.**
+**SchemaSentinel acts as an autonomous shock-absorber for your data.** Think of it like a smart universal adapter: the moment incoming data shifts or changes shape, SchemaSentinel automatically catches it, rewires the mismatch in 300 milliseconds using pure multi-cloud agentic reasoning, and flows clean data straight into your warehouse—**no broken pipelines, no midnight alarms, and zero downtime.**
 
 ---
 
-## 🏗️ Architecture
+## 🏗️ Multi-Cloud Resilience Architecture
 
 ```text
 [ Upstream Ingress Stream ] (GitHub REST API + Tavily Grounding)
@@ -31,8 +31,9 @@ Instantly, your entire data pipeline crashes. Red alert sirens go off on PagerDu
             │                                           ▼
             ▼                                 [ Live Warehouse ]
   [ Strands Agent Engine ]                     (tech_projects)
-    (AWS Bedrock Mantle)                      (0% Schema Downtime)
-            │                                           ▲
+    ├── Primary: AWS Bedrock Mantle           (0% Schema Downtime)
+    └── Fallback: Nebius Studio SOTA LLM                ▲
+            │                                           │
             ▼                                           │
   [ AST Security Sandbox ]                              │
     ├── Compile Passed ──────► Auto-Heals & Conforms ───┘
@@ -51,12 +52,13 @@ git clone https://github.com/lvhNaruto/SchemaSentinel-Strands.git
 cd SchemaSentinel-Strands
 pip install -r requirements.txt
 
-# 2. Environment (.env)
-AWS_ACCESS_KEY_ID=your_key
-AWS_SECRET_ACCESS_KEY=your_secret
-AWS_REGION=us-east-1
-TAVILY_API_KEY=your_key
+# 2. Environment Configuration (.env)
+AWS_ACCESS_KEY_ID=your_aws_key
+AWS_SECRET_ACCESS_KEY=your_aws_secret
+AWS_REGION=us-west-2
+NEBIUS_API_KEY=your_nebius_studio_key
+TAVILY_API_KEY=your_tavily_key
 
-# 3. Launch App
+# 3. Launch Dashboard
 streamlit run app.py
 ```
