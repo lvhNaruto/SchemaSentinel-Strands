@@ -6,6 +6,10 @@
 
 ## ⚡ The Problem & Why SchemaSentinel Exists
 
+ *"Data engineers spend over 40% of their working hours manually firefighting broken data pipelines instead of building strategic infrastructure."* — **Gartner & Monte Carlo Data Reliability Study**
+> 
+> *"The cost of bad data in the US alone is estimated at a staggering $3.1 Trillion per year."* — **IBM & Harvard Business Review Research**
+
 **Imagine this:** It's 2:00 AM. A third-party company pushes an update and silently changes a single field name: `"user_id"` becomes `"userId"`.
 
 Instantly, your entire data pipeline crashes. Red alert sirens go off on PagerDuty. Critical executive dashboards freeze, analytics reports show zero, and engineers are woken up in the middle of the night to write an emergency 2-line code fix.
