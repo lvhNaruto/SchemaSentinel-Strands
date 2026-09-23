@@ -1,0 +1,26 @@
+{
+  "valid_score_keys": [
+    "relevance_score",
+    "score",
+    "eval_score",
+    "confidence",
+    "confidence_score",
+    "confidence_rating",
+    "rating",
+    "popularity_pct",
+    "pct",
+    "percent",
+    "percentage",
+    "match_score",
+    "relevance",
+    "stars_count_pct"
+  ],
+  "raw_metric_score_keys": [
+    "rating_out_of_5",
+    "rating_out_of_10",
+    "rating_out_of_100",
+    "popularity_pct",
+    "confidence",
+    "relevance_score"
+  ]
+}

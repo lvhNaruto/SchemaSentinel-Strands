@@ -1,0 +1,74 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --obsidian: #05070d;
+  --border: #1a2332;
+  --border-lit: #24314a;
+}
+
+html,
+body {
+  background-color: var(--obsidian);
+  color: #f8fafc;
+  font-family: var(--font-inter), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background-image:
+    radial-gradient(900px 420px at 12% -8%, rgba(16, 185, 129, 0.07), transparent 60%),
+    radial-gradient(800px 420px at 88% -12%, rgba(139, 92, 246, 0.08), transparent 60%),
+    radial-gradient(700px 500px at 50% 120%, rgba(34, 211, 238, 0.05), transparent 60%);
+  background-attachment: fixed;
+}
+
+@layer components {
+  .panel {
+    @apply rounded-2xl border border-edge bg-panel/80 p-4 shadow-[0_8px_28px_rgba(0,0,0,0.35)] backdrop-blur-sm;
+  }
+  .panel-title {
+    @apply mb-3 font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-inkdim;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full border border-edge bg-white/[0.04] px-2.5 py-0.5 font-mono text-[10.5px] font-semibold text-inkdim;
+  }
+  .code-block {
+    @apply max-h-72 overflow-auto rounded-xl border border-edge bg-[#030509] p-3 font-mono text-[11px] leading-relaxed text-inkdim;
+  }
+  .term-line {
+    @apply whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-inkdim;
+  }
+}
+
+/* Focus visibility for keyboard users */
+:focus-visible {
+  outline: 2px solid #34d399;
+  outline-offset: 2px;
+}
+
+/* Slim scrollbars */
+*::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Honored by framer-motion's useReducedMotion + GSAP matchMedia; CSS animations too */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

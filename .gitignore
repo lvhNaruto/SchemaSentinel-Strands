@@ -18,3 +18,22 @@ extra/
 node_modules/
 dist/
 .DS_Store
+
+# Next.js build output
+frontend/.next/
+frontend/out/
+
+# Logs / runtime artifacts
+logs/
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# Unused scaffold directories
+automation/
+context/
+
+# IDE / OS
+.vscode/
+.idea/
+Thumbs.db

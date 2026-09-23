@@ -57,36 +57,68 @@ def run_cli_pipeline(topics=None):
             print(f"    ⚡ Invoking Strands Agent on AWS Bedrock Mantle (xai.grok-4.6)...")
 
             target_schema = db.get_table_schema("tech_projects")
-            raw_patch = agent.synthesize_transformation_patch(
-                failing_records=recs,
-                target_schema=target_schema,
-                error_trace=err_trace
-            )
-            clean_patch = agent.extract_pure_code(raw_patch)
+            sig = agent.compute_schema_signature(recs[0])
+            cached = db.get_template(sig)
+            if cached:
+                clean_patch = cached["patch_code"]
+                print(f"    💾 Cache hit for signature `{sig}` — using learned template.")
+            else:
+                print(f"    🧠 Cache miss for signature `{sig}` — invoking Strands Agent.")
+                raw_patch = agent.synthesize_transformation_patch(
+                    failing_records=recs,
+                    target_schema=target_schema,
+                    error_trace=err_trace
+                )
+                clean_patch = agent.extract_pure_code(raw_patch)
 
             compiled, func, compile_msg = SandboxExecutor.compile_patch(clean_patch)
             if compiled:
                 transformed_batch = []
                 for r in recs:
+                    detected_keys = ", ".join(str(k) for k in r.keys())
+                    quarantine = False
                     try:
                         healed_raw = func(r)
+                    except ValueError as ve:
+                        if "IRRECOVERABLE_SCHEMA_DRIFT" in str(ve):
+                            db.insert_dlq(r, str(ve), b_id, detected_keys=detected_keys)
+                            print(f"    ⚠️ Unhealable record — routing to DLQ.")
+                            quarantine = True
+                        healed_raw = None
                     except Exception:
                         healed_raw = None
 
+                    if quarantine:
+                        continue
+
                     # Zero-Crash Shield
+                    fallback_fn = getattr(agent, "get_fallback_dict", None)
                     if isinstance(healed_raw, dict):
                         healed = healed_raw
+                    elif callable(fallback_fn):
+                        healed = fallback_fn(r)
                     else:
-                        healed = agent.get_fallback_dict(r)
+                        healed = None
+
+                    if not isinstance(healed, dict):
+                        print(f"    ⚠️ Unhealable record — routing to DLQ.")
+                        db.insert_dlq(r, "Transformation did not return a valid dict", b_id, detected_keys=detected_keys)
+                        continue
 
                     healed["batch_id"] = b_id
                     healed["ingestion_status"] = "auto_healed"
                     transformed_batch.append(healed)
 
+                if not transformed_batch:
+                    print(f"    ❌ Batch could not be healed; records quarantined in DLQ.")
+                    continue
+
                 inserted, skipped = db.insert_batch(
                     transformed_batch, batch_id=b_id, status="auto_healed"
                 )
-                print(f"    🎉 HEALED: Synthesized AST transformation patch via Bedrock Mantle.")
+                if not cached:
+                    db.save_template(sig, clean_patch, recs[0])
+                print(f"    🎉 HEALED: {'Synthesized' if not cached else 'Applied cached'} AST transformation patch via Bedrock Mantle.")
                 print(f"    ✨ Inserted: {inserted} records ({f_summary})")
             else:
                 print(f"    ❌ Sandbox compilation failed: {compile_msg}")
