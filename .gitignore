@@ -26,6 +26,7 @@ frontend/out/
 # Logs / runtime artifacts
 logs/
 *.log
+*.err
 npm-debug.log*
 yarn-error.log*
 
