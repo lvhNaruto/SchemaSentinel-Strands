@@ -60,11 +60,11 @@ python pipeline_runner.py "your custom topic"
 
 ## 🧠 3-Tier Data Triage SLA
 
-| Tier | Condition | Outcome |
-|---|---|---|---
-| **Clean** | Payload matches `title`, `author`, `source_url`, `relevance_score` exactly | Bypasses the LLM; committed to `tech_projects` as `clean` (zero latency, zero tokens) |
-| **Drift / Mixed** | Legitimate project data with renamed keys, authors in URLs, percentage scores, or extra fields | Agent synthesizes an AST-verified `transform_record` patch; committed as `auto_healed`; all unmapped keys are preserved in `extra_metadata` |
-| **Alien / Corrupted** | No project identity (e.g., IoT sensor readings, random noise) | Agent raises `IRRECOVERABLE_SCHEMA_DRIFT`; sandbox routes the raw payload to `tech_projects_dlq` with detected keys |
+| Tier                  | Condition                                                                                      | Outcome                                                                                                                                     |
+| --------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Clean**             | Payload matches `title`, `author`, `source_url`, `relevance_score` exactly                     | Bypasses the LLM; committed to `tech_projects` as `clean` (zero latency, zero tokens)                                                       |
+| **Drift / Mixed**     | Legitimate project data with renamed keys, authors in URLs, percentage scores, or extra fields | Agent synthesizes an AST-verified `transform_record` patch; committed as `auto_healed`; all unmapped keys are preserved in `extra_metadata` |
+| **Alien / Corrupted** | No project identity (e.g., IoT sensor readings, random noise)                                  | Agent raises `IRRECOVERABLE_SCHEMA_DRIFT`; sandbox routes the raw payload to `tech_projects_dlq` with detected keys                         |
 
 ## 💾 Learned Template Cache
 
